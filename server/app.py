@@ -25,7 +25,9 @@ except ImportError:
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+# ── FIX: import Body so route params can have defaults ──────────────────────
+from fastapi import Body
+from pydantic import BaseModel, Field
 import uvicorn
 
 from environment import (
@@ -61,6 +63,7 @@ _agent = None
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Pydantic models
+# ── FIX: All fields now have defaults so an empty/missing body is accepted ───
 # ─────────────────────────────────────────────────────────────────────────────
 class ResetRequest(BaseModel):
     task: int = 1
@@ -70,7 +73,7 @@ class StepRequest(BaseModel):
     action: Optional[int] = None
 
 class InjectRequest(BaseModel):
-    scenario: str
+    scenario: str = "database_crash"
 
 class SolveRequest(BaseModel):
     services:    Optional[Dict] = None
@@ -80,7 +83,7 @@ class SolveRequest(BaseModel):
     action_taken: Optional[str] = None
 
 class SolveActionRequest(BaseModel):
-    obs: list
+    obs: list = Field(default_factory=list)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1379,6 +1382,7 @@ td{{padding:9px 12px;border-bottom:1px solid #0c1528}}tr:last-child td{{border-b
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ROUTES
+# ── FIX: All POST routes now use Body(default=...) so empty bodies are OK ────
 # ─────────────────────────────────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 def landing(): return LANDING_HTML
@@ -1418,8 +1422,9 @@ def list_tasks():
         "action_space":  {str(k): v for k, v in ACTION_NAMES.items()},
     }
 
+# ── FIX: Body(default=ResetRequest()) makes the body fully optional ──────────
 @app.post("/reset")
-def reset_episode(req: ResetRequest):
+def reset_episode(req: ResetRequest = Body(default=ResetRequest())):
     global _env
     task = req.task
     if req.difficulty:
@@ -1440,8 +1445,9 @@ def reset_episode(req: ResetRequest):
 def reset_task(task_id: int):
     return reset_episode(ResetRequest(task=task_id))
 
+# ── FIX: Body(default=StepRequest()) makes the body fully optional ───────────
 @app.post("/step")
-def step_episode(req: StepRequest):
+def step_episode(req: StepRequest = Body(default=StepRequest())):
     env   = _require_env()
     agent = _load_agent()
     if env.step_count >= env.max_steps:
@@ -1490,8 +1496,9 @@ def action_log(last_n: int = 20):
     log = env.get_action_log()
     return {"total_steps": len(log), "showing": min(last_n, len(log)), "log": log[-last_n:]}
 
+# ── FIX: Body(default=InjectRequest()) makes the body fully optional ─────────
 @app.post("/inject")
-def inject_scenario(req: InjectRequest):
+def inject_scenario(req: InjectRequest = Body(default=InjectRequest())):
     env    = _require_env()
     result = env.inject_scenario(req.scenario)
     if "error" in result:
@@ -1500,8 +1507,9 @@ def inject_scenario(req: InjectRequest):
 
 
 # ── THE KEY ENDPOINT ──────────────────────────────────────────────────────────
+# ── FIX: Body(default=SolveRequest()) makes the body fully optional ──────────
 @app.post("/solve")
-def solve(req: SolveRequest):
+def solve(req: SolveRequest = Body(default=SolveRequest())):
     """
     Flow: Input → RL Agent (PPO/Heuristic) → Groq explanation
 
@@ -1518,8 +1526,6 @@ def solve(req: SolveRequest):
         if parsed:
             services_input = parsed
         else:
-            # Absolute last resort — treat entire input as "all healthy" so
-            # the RL agent still runs and returns a do_nothing result
             print(f"[solve] Could not parse text, using empty state")
             services_input = {}
 
@@ -1572,8 +1578,9 @@ def solve(req: SolveRequest):
         "source":             explanation_result["source"],  # legacy field
     }
 
+# ── FIX: Body(default=SolveActionRequest()) makes the body fully optional ────
 @app.post("/solve-action")
-def solve_action(req: SolveActionRequest):
+def solve_action(req: SolveActionRequest = Body(default=SolveActionRequest())):
     """30-float obs vector → RL agent action (no LLM)."""
     import numpy as np
     agent  = _load_agent()
